@@ -1,0 +1,62 @@
+name: build-macos-arm64-compat-pack
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/build_macos_arm64_compat_pack.yaml"
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Patch macOS dependency compatibility
+        run: |
+          cd simple_live_app
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('pubspec.yaml')
+          text = p.read_text()
+          text = text.replace('connectivity_plus: ^7.0.0 #网络状态', 'connectivity_plus: 7.0.0 #网络状态')
+          p.write_text(text)
+          PY
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.38.x"
+          cache: true
+
+      - name: Enable Flutter Desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Restore packages
+        run: |
+          cd simple_live_app
+          flutter pub get
+
+      - name: Build macOS
+        run: |
+          cd simple_live_app
+          flutter build macos --release
+
+      - name: Package app
+        run: |
+          cd simple_live_app/build/macos/Build/Products/Release
+          ls -la
+          ditto -c -k --sequesterRsrc --keepParent "Simple Live.app" simple_live_app-macos-arm64.zip
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: simple_live_app/build/macos/Build/Products/Release/simple_live_app-macos-arm64.zip
