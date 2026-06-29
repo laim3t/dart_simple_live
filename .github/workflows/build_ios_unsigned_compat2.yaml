@@ -1,0 +1,59 @@
+name: build-ios-unsigned-compat2
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build_ios_unsigned_compat2.yaml'
+
+jobs:
+  build-ios:
+    runs-on: macos-14-arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Patch iOS dependency compatibility
+        run: |
+          cd simple_live_app
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('pubspec.yaml')
+          text = p.read_text()
+          text = text.replace('connectivity_plus: ^7.0.0 #网络状态', 'connectivity_plus: 7.0.0 #网络状态')
+          text = text.replace('device_info_plus: ^12.2.0 #设备信息', 'device_info_plus: 12.3.0 #设备信息')
+          p.write_text(text)
+          PY
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.x'
+          channel: stable
+          cache: true
+
+      - name: Restore packages
+        run: |
+          cd simple_live_app
+          flutter pub get
+
+      - name: Build iOS unsigned
+        run: |
+          cd simple_live_app
+          flutter build ios --release --no-codesign
+
+      - name: Create unsigned IPA
+        run: |
+          cd simple_live_app
+          rm -rf ipa Payload
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry ios_unsigned.ipa Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-unsigned
+          path: simple_live_app/ios_unsigned.ipa
+          if-no-files-found: error
