@@ -1,0 +1,70 @@
+name: build-android-apk-signed
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build_android_apk_signed.yaml'
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.x'
+          channel: stable
+          cache: true
+
+      - name: Create temporary Android signing key
+        run: |
+          cd simple_live_app/android
+          keytool -genkeypair \
+            -v \
+            -keystore upload-keystore.jks \
+            -storepass android \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -alias upload \
+            -dname "CN=Simple Live, OU=Codex, O=Simple Live, L=Hong Kong, S=Hong Kong, C=CN"
+          cat > key.properties <<'EOF'
+          storePassword=android
+          keyPassword=android
+          keyAlias=upload
+          storeFile=upload-keystore.jks
+          EOF
+
+      - name: Restore packages
+        run: |
+          cd simple_live_app
+          flutter pub get
+
+      - name: Build Android APK
+        run: |
+          cd simple_live_app
+          flutter build apk --release
+
+      - name: Collect APK
+        run: |
+          mkdir -p artifacts
+          cp simple_live_app/build/app/outputs/flutter-apk/app-release.apk artifacts/simple_live_app-1.11.4-release.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: artifacts/simple_live_app-1.11.4-release.apk
+          if-no-files-found: error
