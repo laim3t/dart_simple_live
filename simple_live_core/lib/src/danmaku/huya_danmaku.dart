@@ -125,6 +125,7 @@ class HuyaDanmaku implements LiveDanmaku {
               .readFrom(TarsInputStream(Uint8List.fromList(wSPushMessage.msg)));
           var uname = messageNotice.userInfo.nickName;
           var content = messageNotice.content;
+          var userId = messageNotice.userInfo.uid.toString();
 
           var color = messageNotice.bulletFormat.fontColor;
 
@@ -136,6 +137,7 @@ class HuyaDanmaku implements LiveDanmaku {
                   : LiveMessageColor.numberToColor(color),
               message: content,
               userName: uname,
+              userId: userId,
             ),
           );
         } else if (wSPushMessage.uri == 8006) {

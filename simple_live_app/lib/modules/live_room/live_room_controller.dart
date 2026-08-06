@@ -18,10 +18,12 @@ import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/models/db/history.dart';
+import 'package:simple_live_app/models/db/marked_user.dart';
 import 'package:simple_live_app/modules/live_room/player/player_controller.dart';
 import 'package:simple_live_app/modules/settings/danmu_settings_page.dart';
 import 'package:simple_live_app/services/db_service.dart';
 import 'package:simple_live_app/services/follow_service.dart';
+import 'package:simple_live_app/services/marked_user_service.dart';
 import 'package:simple_live_app/widgets/desktop_refresh_button.dart';
 import 'package:simple_live_app/widgets/follow_user_item.dart';
 import 'package:simple_live_core/simple_live_core.dart';
@@ -230,6 +232,18 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 
       messages.add(msg);
 
+      // 标记用户：记录后续弹幕（本地持久化）
+      if (msg.userId.isNotEmpty) {
+        MarkedUserService.instance.recordDanmaku(
+          siteId: site.id,
+          userId: msg.userId,
+          userName: msg.userName,
+          content: msg.message,
+          roomId: roomId,
+          roomTitle: detail.value?.title ?? '',
+        );
+      }
+
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => chatScrollToBottom(),
       );
@@ -237,15 +251,24 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         return;
       }
 
+      final bool isMarkedHighlight = msg.userId.isNotEmpty &&
+          MarkedUserService.instance.shouldHighlight(
+            site.id,
+            msg.userId,
+            roomId,
+          );
+
       addDanmaku([
         DanmakuContentItem(
-          msg.message,
-          color: Color.fromARGB(
-            255,
-            msg.color.r,
-            msg.color.g,
-            msg.color.b,
-          ),
+          isMarkedHighlight ? "${msg.userName}：${msg.message}" : msg.message,
+          color: isMarkedHighlight
+              ? MarkedUserService.highlightColor
+              : Color.fromARGB(
+                  255,
+                  msg.color.r,
+                  msg.color.g,
+                  msg.color.b,
+                ),
         ),
       ]);
     } else if (msg.type == LiveMessageType.online) {
@@ -616,6 +639,135 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
             },
           ),
         ],
+      ),
+    );
+  }
+
+  /// 点击弹幕用户名：标记用户（高亮 / 记录）
+  void showMarkedUserSheet(LiveMessage message) {
+    if (message.userName == "LiveSysMessage") {
+      return;
+    }
+    if (message.userId.isEmpty) {
+      SmartDialog.showToast("无法获取该用户ID，暂不支持标记");
+      return;
+    }
+
+    final existing =
+        MarkedUserService.instance.getMarkedUser(site.id, message.userId);
+    final highlight = (existing?.highlight ?? false).obs;
+    final record = (existing?.record ?? false).obs;
+    final scope = (existing?.scope ?? MarkedUserScope.global).obs;
+
+    Utils.showBottomSheet(
+      title: "标记用户",
+      child: Obx(
+        () => ListView(
+          padding: AppStyle.edgeInsetsA12,
+          children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(message.userName),
+              subtitle: Text(
+                "${Sites.allSites[site.id]?.name ?? site.id} · ID: ${message.userId}",
+              ),
+            ),
+            const Divider(),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text("高亮该用户弹幕"),
+              subtitle: const Text("仅影响标记之后的新弹幕"),
+              value: highlight.value,
+              onChanged: (v) => highlight.value = v,
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text("记录该用户弹幕"),
+              subtitle: const Text("本地保存，可在设置页查看"),
+              value: record.value,
+              onChanged: (v) => record.value = v,
+            ),
+            const SizedBox(height: 8),
+            const Text("作用范围", style: TextStyle(fontWeight: FontWeight.bold)),
+            RadioGroup(
+              groupValue: scope.value,
+              onChanged: (v) {
+                if (v != null) scope.value = v;
+              },
+              child: Column(
+                children: [
+                  RadioListTile<int>(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("全局所有直播间"),
+                    value: MarkedUserScope.global,
+                  ),
+                  RadioListTile<int>(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("仅当前直播间"),
+                    subtitle: Text("房间：$roomId"),
+                    value: MarkedUserScope.room,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                if (existing != null)
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        final ok = await Utils.showAlertDialog(
+                          "确定取消对该用户的标记吗？（已记录的弹幕默认保留）",
+                          title: "取消标记",
+                        );
+                        if (!ok) return;
+                        await MarkedUserService.instance.removeMarkedUser(
+                          existing.id,
+                          deleteHistory: false,
+                        );
+                        Get.back();
+                        SmartDialog.showToast("已取消标记");
+                      },
+                      child: const Text("取消标记"),
+                    ),
+                  ),
+                if (existing != null) const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      if (!highlight.value && !record.value) {
+                        if (existing != null) {
+                          await MarkedUserService.instance.removeMarkedUser(
+                            existing.id,
+                            deleteHistory: false,
+                          );
+                          Get.back();
+                          SmartDialog.showToast("已取消标记");
+                        } else {
+                          SmartDialog.showToast("请至少开启一项功能");
+                        }
+                        return;
+                      }
+                      await MarkedUserService.instance.saveMarkedUser(
+                        siteId: site.id,
+                        userId: message.userId,
+                        userName: message.userName,
+                        highlight: highlight.value,
+                        record: record.value,
+                        scope: scope.value,
+                        roomId: roomId,
+                      );
+                      Get.back();
+                      SmartDialog.showToast("已保存");
+                    },
+                    child: const Text("保存"),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

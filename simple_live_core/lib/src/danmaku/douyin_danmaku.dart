@@ -152,6 +152,9 @@ class DouyinDanmaku implements LiveDanmaku {
 
   void unPackWebcastChatMessage(List<int> payload) {
     var chatMessage = ChatMessage.fromBuffer(payload);
+    final userId = chatMessage.user.idStr.isNotEmpty
+        ? chatMessage.user.idStr
+        : chatMessage.user.id.toString();
     onMessage?.call(
       LiveMessage(
         type: LiveMessageType.chat,
@@ -162,6 +165,7 @@ class DouyinDanmaku implements LiveDanmaku {
         //     : LiveMessageColor.numberToColor(color),
         message: chatMessage.content,
         userName: chatMessage.user.nickName,
+        userId: userId == "0" ? "" : userId,
       ),
     );
   }

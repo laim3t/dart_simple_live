@@ -20,6 +20,8 @@ import 'package:simple_live_app/app/utils/listen_fourth_button.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/models/db/follow_user_tag.dart';
 import 'package:simple_live_app/models/db/history.dart';
+import 'package:simple_live_app/models/db/marked_user.dart';
+import 'package:simple_live_app/models/db/marked_user_danmaku.dart';
 import 'package:simple_live_app/modules/other/debug_log_page.dart';
 import 'package:simple_live_app/routes/app_pages.dart';
 import 'package:simple_live_app/routes/route_path.dart';
@@ -28,6 +30,7 @@ import 'package:simple_live_app/services/douyin_account_service.dart';
 import 'package:simple_live_app/services/db_service.dart';
 import 'package:simple_live_app/services/follow_service.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
+import 'package:simple_live_app/services/marked_user_service.dart';
 import 'package:simple_live_app/services/sync_service.dart';
 import 'package:simple_live_app/widgets/status/app_loadding_widget.dart';
 import 'package:simple_live_core/simple_live_core.dart';
@@ -120,6 +123,8 @@ Future initServices() async {
   Hive.registerAdapter(FollowUserAdapter());
   Hive.registerAdapter(HistoryAdapter());
   Hive.registerAdapter(FollowUserTagAdapter());
+  Hive.registerAdapter(MarkedUserAdapter());
+  Hive.registerAdapter(MarkedUserDanmakuAdapter());
 
   //包信息
   Utils.packageInfo = await PackageInfo.fromPlatform();
@@ -137,6 +142,8 @@ Future initServices() async {
   Get.put(SyncService());
 
   Get.put(FollowService());
+
+  await Get.putAsync(() => MarkedUserService().init());
 
   initCoreLog();
 }

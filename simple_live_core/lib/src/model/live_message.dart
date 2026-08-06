@@ -21,6 +21,9 @@ class LiveMessage {
   /// 用户名
   final String userName;
 
+  /// 用户ID（平台侧 UID，用于标记用户；可能为空）
+  final String userId;
+
   /// 信息
   final String message;
 
@@ -36,6 +39,7 @@ class LiveMessage {
     required this.message,
     this.data,
     required this.color,
+    this.userId = "",
   });
 
   @override
@@ -43,6 +47,7 @@ class LiveMessage {
     return json.encode({
       "type": type.index,
       "userName": userName,
+      "userId": userId,
       "message": message,
       "data": data.toString(),
       "color": color.toString(),

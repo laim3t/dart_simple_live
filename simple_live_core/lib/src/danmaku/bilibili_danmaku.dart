@@ -194,9 +194,11 @@ class BiliBiliDanmaku implements LiveDanmaku {
           var color = asT<int?>(obj["info"][0][3]) ?? 0;
           if (obj["info"][2] != null && obj["info"][2].length != 0) {
             var username = obj["info"][2][1].toString();
+            var userId = obj["info"][2][0]?.toString() ?? "";
             var liveMsg = LiveMessage(
               type: LiveMessageType.chat,
               userName: username,
+              userId: userId,
               message: message,
               color: color == 0
                   ? LiveMessageColor.white

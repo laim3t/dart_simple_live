@@ -14,6 +14,7 @@ import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/modules/live_room/live_room_controller.dart';
 import 'package:simple_live_app/modules/live_room/player/player_controls.dart';
 import 'package:simple_live_app/services/follow_service.dart';
+import 'package:simple_live_app/services/marked_user_service.dart';
 import 'package:simple_live_app/widgets/desktop_refresh_button.dart';
 import 'package:simple_live_app/widgets/follow_user_item.dart';
 import 'package:simple_live_app/widgets/keep_alive_wrapper.dart';
@@ -532,65 +533,85 @@ class LiveRoomPage extends GetView<LiveRoomController> {
     }
 
     return Obx(
-      () => AppSettingsController.instance.chatBubbleStyle.value
-          ? Row(
-              mainAxisAlignment: MainAxisAlignment.start,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Flexible(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.blueGrey.withAlpha(25),
-                      //borderRadius: AppStyle.radius8,
-                      borderRadius: const BorderRadius.only(
-                        topRight: Radius.circular(12),
-                        bottomLeft: Radius.circular(12),
-                        bottomRight: Radius.circular(12),
-                      ),
-                    ),
-                    padding:
-                        AppStyle.edgeInsetsA4.copyWith(left: 12, right: 12),
-                    child: Text.rich(
-                      TextSpan(
-                        text: "${message.userName}：",
-                        style: TextStyle(
-                          color: Colors.grey,
-                          fontSize:
-                              AppSettingsController.instance.chatTextSize.value,
-                        ),
-                        children: [
-                          TextSpan(
-                            text: message.message,
-                            style: TextStyle(
-                              color: Get.isDarkMode
-                                  ? Colors.white
-                                  : AppColors.black333,
-                            ),
-                          )
-                        ],
-                      ),
+      () {
+        // 依赖标记列表刷新高亮样式
+        final _ = MarkedUserService.instance.markedUsers.length;
+        final bool isMarkedHighlight = message.userId.isNotEmpty &&
+            MarkedUserService.instance.shouldHighlight(
+              controller.site.id,
+              message.userId,
+              controller.roomId,
+            );
+        final double fontSize =
+            AppSettingsController.instance.chatTextSize.value;
+        final Color nameColor = isMarkedHighlight
+            ? MarkedUserService.highlightColor
+            : Colors.grey;
+        final Color msgColor = isMarkedHighlight
+            ? MarkedUserService.highlightColor
+            : (Get.isDarkMode ? Colors.white : AppColors.black333);
+        final FontWeight nameWeight =
+            isMarkedHighlight ? FontWeight.bold : FontWeight.normal;
+
+        final rich = Text.rich(
+          TextSpan(
+            children: [
+              WidgetSpan(
+                alignment: PlaceholderAlignment.baseline,
+                baseline: TextBaseline.alphabetic,
+                child: GestureDetector(
+                  onTap: () => controller.showMarkedUserSheet(message),
+                  child: Text(
+                    "${message.userName}：",
+                    style: TextStyle(
+                      color: nameColor,
+                      fontSize: fontSize,
+                      fontWeight: nameWeight,
                     ),
                   ),
                 ),
-              ],
-            )
-          : Text.rich(
-              TextSpan(
-                text: "${message.userName}：",
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: AppSettingsController.instance.chatTextSize.value,
-                ),
-                children: [
-                  TextSpan(
-                    text: message.message,
-                    style: TextStyle(
-                      color: Get.isDarkMode ? Colors.white : AppColors.black333,
-                    ),
-                  )
-                ],
               ),
-            ),
+              TextSpan(
+                text: message.message,
+                style: TextStyle(
+                  color: msgColor,
+                  fontSize: fontSize,
+                  fontWeight:
+                      isMarkedHighlight ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
+        );
+
+        if (AppSettingsController.instance.chatBubbleStyle.value) {
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Flexible(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: isMarkedHighlight
+                        ? MarkedUserService.highlightColor.withAlpha(40)
+                        : Colors.blueGrey.withAlpha(25),
+                    borderRadius: const BorderRadius.only(
+                      topRight: Radius.circular(12),
+                      bottomLeft: Radius.circular(12),
+                      bottomRight: Radius.circular(12),
+                    ),
+                  ),
+                  padding:
+                      AppStyle.edgeInsetsA4.copyWith(left: 12, right: 12),
+                  child: rich,
+                ),
+              ),
+            ],
+          );
+        }
+
+        return rich;
+      },
     );
   }
 
