@@ -21,6 +21,7 @@ import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/models/db/history.dart';
+import 'package:simple_live_app/models/db/marked_user.dart';
 import 'package:simple_live_app/modules/live_room/player/player_controller.dart';
 import 'package:simple_live_app/modules/live_room/live_status_refresh_policy.dart';
 import 'package:simple_live_app/modules/live_room/widgets/live_contribution_rank_panel.dart';
@@ -31,6 +32,7 @@ import 'package:simple_live_app/services/current_room_service.dart';
 import 'package:simple_live_app/services/db_service.dart';
 import 'package:simple_live_app/services/follow_service.dart';
 import 'package:simple_live_app/services/live_subtitle_service.dart';
+import 'package:simple_live_app/services/marked_user_service.dart';
 import 'package:simple_live_app/services/mpv_options_service.dart';
 import 'package:simple_live_app/widgets/filter_button.dart';
 import 'package:simple_live_app/widgets/desktop_refresh_button.dart';
@@ -452,6 +454,7 @@ class LiveRoomController extends PlayerController
     return LiveMessage(
       type: message.type,
       userName: normalizedUserName,
+      userId: message.userId,
       message: normalizedMessage,
       data: message.data,
       color: message.color,
@@ -606,6 +609,7 @@ class LiveRoomController extends PlayerController
   void showUserActions(
     String userName, {
     String? messageContent,
+    String? userId,
   }) {
     final value = _normalizeUserName(userName);
     if (value.isEmpty) {
@@ -621,6 +625,10 @@ class LiveRoomController extends PlayerController
     );
     final isTempMuted = tempMutedUsers.contains(value);
     final remark = getUserRemark(value);
+    final resolvedUserId = (userId ?? "").trim();
+    final marked = resolvedUserId.isEmpty
+        ? null
+        : MarkedUserService.instance.getMarkedUser(site.id, resolvedUserId);
 
     Utils.showBottomSheet(
       title: value,
@@ -632,6 +640,33 @@ class LiveRoomController extends PlayerController
               title: Text("当前备注：$remark"),
               dense: true,
             ),
+          if (resolvedUserId.isNotEmpty)
+            ListTile(
+              leading: const Icon(Icons.badge_outlined),
+              title: Text("用户ID：$resolvedUserId"),
+              dense: true,
+            ),
+          ListTile(
+            leading: Icon(
+              marked != null
+                  ? Icons.star
+                  : Icons.star_border,
+              color: marked != null ? MarkedUserService.highlightColor : null,
+            ),
+            title: Text(marked != null ? "管理特别关注" : "特别关注此用户"),
+            subtitle: Text(
+              marked == null
+                  ? "高亮后续弹幕 / 记录弹幕（平台+ID）"
+                  : "高亮:${marked.highlight ? "开" : "关"} · 记录:${marked.record ? "开" : "关"} · ${marked.isGlobal ? "全局" : "本房间"}",
+            ),
+            onTap: () {
+              Get.back();
+              showMarkedUserSheet(
+                userName: value,
+                userId: resolvedUserId,
+              );
+            },
+          ),
           ListTile(
             leading: Icon(
               isShielded ? Icons.visibility_outlined : Icons.block_outlined,
@@ -702,6 +737,138 @@ class LiveRoomController extends PlayerController
     );
   }
 
+  /// 特别关注：高亮 / 记录弹幕（平台 + 用户ID）
+  void showMarkedUserSheet({
+    required String userName,
+    required String userId,
+  }) {
+    if (userId.isEmpty) {
+      SmartDialog.showToast("无法获取该用户ID，暂不支持特别关注");
+      return;
+    }
+
+    final existing =
+        MarkedUserService.instance.getMarkedUser(site.id, userId);
+    final highlight = (existing?.highlight ?? false).obs;
+    final record = (existing?.record ?? false).obs;
+    final scope = (existing?.scope ?? MarkedUserScope.global).obs;
+
+    Utils.showBottomSheet(
+      title: "特别关注",
+      child: Obx(
+        () => ListView(
+          padding: AppStyle.edgeInsetsA12,
+          children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(userName),
+              subtitle: Text("${site.name} · ID: $userId"),
+            ),
+            const Divider(),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text("高亮该用户弹幕"),
+              subtitle: const Text("仅影响标记之后的新弹幕"),
+              value: highlight.value,
+              onChanged: (v) => highlight.value = v,
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text("记录该用户弹幕"),
+              subtitle: const Text("本地保存，可在「特别关注」设置页查看"),
+              value: record.value,
+              onChanged: (v) => record.value = v,
+            ),
+            const SizedBox(height: 8),
+            const Text("作用范围", style: TextStyle(fontWeight: FontWeight.bold)),
+            RadioGroup(
+              groupValue: scope.value,
+              onChanged: (v) {
+                if (v != null) scope.value = v;
+              },
+              child: Column(
+                children: [
+                  RadioListTile<int>(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("全局所有直播间"),
+                    value: MarkedUserScope.global,
+                  ),
+                  RadioListTile<int>(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("仅当前直播间"),
+                    subtitle: Text("房间：$roomId"),
+                    value: MarkedUserScope.room,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                if (existing != null)
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        final ok = await Utils.showAlertDialog(
+                          "确定取消对该用户的特别关注吗？（已记录弹幕默认保留）",
+                          title: "取消特别关注",
+                        );
+                        if (!ok) return;
+                        await MarkedUserService.instance.removeMarkedUser(
+                          existing.id,
+                          deleteHistory: false,
+                        );
+                        Get.back();
+                        SmartDialog.showToast("已取消特别关注");
+                      },
+                      child: const Text("取消关注"),
+                    ),
+                  ),
+                if (existing != null) const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      if (!highlight.value && !record.value) {
+                        if (existing != null) {
+                          await MarkedUserService.instance.removeMarkedUser(
+                            existing.id,
+                            deleteHistory: false,
+                          );
+                          Get.back();
+                          SmartDialog.showToast("已取消特别关注");
+                        } else {
+                          SmartDialog.showToast("请至少开启一项功能");
+                        }
+                        return;
+                      }
+                      await MarkedUserService.instance.saveMarkedUser(
+                        siteId: site.id,
+                        userId: userId,
+                        userName: userName,
+                        highlight: highlight.value,
+                        record: record.value,
+                        scope: scope.value,
+                        roomId: roomId,
+                      );
+                      Get.back();
+                      SmartDialog.showToast("已保存");
+                    },
+                    child: const Text("保存"),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  bool isMarkedHighlightUser(String userId) {
+    if (userId.isEmpty) return false;
+    return MarkedUserService.instance.shouldHighlight(site.id, userId, roomId);
+  }
+
   void copyUserName(String userName) {
     final value = _normalizeUserName(userName);
     if (value.isEmpty) {
@@ -740,19 +907,25 @@ class LiveRoomController extends PlayerController
   }
 
   void _scheduleOverlayDanmaku(LiveMessage msg) {
-    final color = Color.fromARGB(
-      255,
-      msg.color.r,
-      msg.color.g,
-      msg.color.b,
-    );
+    final isMarkedHighlight = isMarkedHighlightUser(msg.userId);
+    final color = isMarkedHighlight
+        ? MarkedUserService.highlightColor
+        : Color.fromARGB(
+            255,
+            msg.color.r,
+            msg.color.g,
+            msg.color.b,
+          );
+    final displayText = isMarkedHighlight
+        ? "${msg.userName}：${msg.message}"
+        : msg.message;
     final baseDelayMs = AppSettingsController.instance.getDanmuDelayMs(site.id);
     final totalDelayMs = baseDelayMs + (site.id == Constant.kHuya ? 1000 : 0);
     final delay = Duration(milliseconds: totalDelayMs.clamp(0, 6000));
     final renderEmoji = AppSettingsController.instance.danmuRenderEmoji.value;
     final parts = renderEmoji ? _buildDanmakuContentParts(msg.spans) : null;
     rememberDanmakuReplay(
-      msg.message,
+      displayText,
       color,
       delay: delay,
       imageUrls: renderEmoji && parts == null ? msg.imageUrls : null,
@@ -767,7 +940,7 @@ class LiveRoomController extends PlayerController
       }
       addDanmaku([
         DanmakuContentItem(
-          msg.message,
+          displayText,
           color: color,
           imageUrls: renderEmoji && parts == null ? msg.imageUrls : null,
           parts: parts,
@@ -1414,6 +1587,18 @@ class LiveRoomController extends PlayerController
       }
 
       messages.add(msg);
+
+      // 特别关注：记录标记之后的新弹幕
+      if (msg.userId.isNotEmpty) {
+        MarkedUserService.instance.recordDanmaku(
+          siteId: site.id,
+          userId: msg.userId,
+          userName: msg.userName,
+          content: msg.message,
+          roomId: roomId,
+          roomTitle: detail.value?.title ?? '',
+        );
+      }
 
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => chatScrollToBottom(),

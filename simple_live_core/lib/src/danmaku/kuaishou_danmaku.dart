@@ -230,10 +230,13 @@ class KuaishouDanmaku extends LiveDanmaku {
     var content = '';
     var color = LiveMessageColor.white;
     var hidden = false;
+    var userId = '';
 
     reader.readFields((fieldNumber, wireType) {
       if (fieldNumber == 2 && wireType == 2) {
-        userName = _decodeSimpleUserInfo(reader.readBytes());
+        final userInfo = _decodeSimpleUserInfo(reader.readBytes());
+        userName = userInfo.$1;
+        userId = userInfo.$2;
       } else if (fieldNumber == 3 && wireType == 2) {
         content = reader.readString();
       } else if (fieldNumber == 6 && wireType == 2) {
@@ -252,22 +255,27 @@ class KuaishouDanmaku extends LiveDanmaku {
     return LiveMessage(
       type: LiveMessageType.chat,
       userName: userName,
+      userId: userId,
       message: content,
       color: color,
     );
   }
 
-  String _decodeSimpleUserInfo(List<int> payload) {
+  /// 返回 (userName, userId)
+  (String, String) _decodeSimpleUserInfo(List<int> payload) {
     final reader = _KuaishouProtoReader(payload);
     var userName = '';
+    var userId = '';
     reader.readFields((fieldNumber, wireType) {
-      if (fieldNumber == 2 && wireType == 2) {
+      if (fieldNumber == 1 && wireType == 0) {
+        userId = reader.readVarint().toString();
+      } else if (fieldNumber == 2 && wireType == 2) {
         userName = reader.readString();
       } else {
         reader.skip(wireType);
       }
     });
-    return userName;
+    return (userName, userId == "0" ? "" : userId);
   }
 
   LiveMessageColor _parseColor(String value) {

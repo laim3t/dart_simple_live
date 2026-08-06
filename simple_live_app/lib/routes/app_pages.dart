@@ -45,6 +45,8 @@ import 'package:simple_live_app/modules/settings/auto_exit_settings_page.dart';
 import 'package:simple_live_app/modules/settings/danmu_settings_page.dart';
 import 'package:simple_live_app/modules/settings/danmu_shield/danmu_shield_controller.dart';
 import 'package:simple_live_app/modules/settings/danmu_shield/danmu_shield_page.dart';
+import 'package:simple_live_app/modules/settings/marked_user/marked_user_controller.dart';
+import 'package:simple_live_app/modules/settings/marked_user/marked_user_page.dart';
 import 'package:simple_live_app/modules/follow_user/follow_user_controller.dart';
 import 'package:simple_live_app/modules/follow_user/follow_user_page.dart';
 import 'package:simple_live_app/modules/mine/history/history_controller.dart';
@@ -191,6 +193,14 @@ class AppPages {
       page: () => const DanmuShieldPage(),
       bindings: [
         BindingsBuilder.put(() => DanmuShieldController()),
+      ],
+    ),
+    //特别关注
+    GetPage(
+      name: RoutePath.kSettingsMarkedUser,
+      page: () => const MarkedUserPage(),
+      bindings: [
+        BindingsBuilder.put(() => MarkedUserController()),
       ],
     ),
     //主页设置

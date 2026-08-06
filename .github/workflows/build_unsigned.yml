@@ -1,0 +1,101 @@
+# 增强版 + 特别关注：Android APK + Windows（临时签名，无需仓库 Secrets）
+name: build-unsigned
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/enhanced-marked-user
+      - enhanced-marked-user
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.41.x"
+          channel: stable
+          cache: true
+
+      - name: Create temporary Android signing key
+        run: |
+          cd simple_live_app/android
+          keytool -genkeypair -v \
+            -keystore app/upload-keystore.jks \
+            -storepass android \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -alias upload \
+            -dname "CN=Simple Live, OU=CI, O=Simple Live, L=Local, S=Local, C=CN"
+          printf '%s\n' \
+            'storePassword=android' \
+            'keyPassword=android' \
+            'keyAlias=upload' \
+            'storeFile=upload-keystore.jks' > key.properties
+
+      - name: Restore packages
+        run: |
+          cd simple_live_app
+          flutter pub get
+
+      - name: Build Android APK
+        run: |
+          cd simple_live_app
+          flutter build apk --release
+
+      - name: Collect APK
+        run: |
+          mkdir -p artifacts
+          cp simple_live_app/build/app/outputs/flutter-apk/app-release.apk \
+            artifacts/simple_live_enhanced-marked-release.apk
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: artifacts/simple_live_enhanced-marked-release.apk
+          if-no-files-found: error
+
+  build-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.41.x"
+          channel: stable
+          cache: true
+
+      - name: Enable Flutter Desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Restore packages
+        run: |
+          cd simple_live_app
+          flutter pub get
+
+      - name: Build Windows
+        run: |
+          cd simple_live_app
+          flutter build windows --release
+
+      - name: Upload Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: simple_live_app/build/windows/x64/runner/Release/**
+          if-no-files-found: error

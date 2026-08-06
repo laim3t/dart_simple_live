@@ -200,6 +200,18 @@ class MinePage extends StatelessWidget {
                   },
                 ),
                 ListTile(
+                  leading: const Icon(Remix.user_star_line),
+                  title: const Text("特别关注"),
+                  subtitle: const Text("标记用户 · 高亮与弹幕记录"),
+                  trailing: const Icon(
+                    Icons.chevron_right,
+                    color: Colors.grey,
+                  ),
+                  onTap: () {
+                    Get.toNamed(RoutePath.kSettingsMarkedUser);
+                  },
+                ),
+                ListTile(
                   leading: const Icon(Remix.heart_line),
                   title: const Text("关注设置"),
                   trailing: const Icon(

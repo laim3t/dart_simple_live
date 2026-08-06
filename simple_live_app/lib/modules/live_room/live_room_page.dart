@@ -16,6 +16,7 @@ import 'package:simple_live_app/modules/live_room/live_room_controller.dart';
 import 'package:simple_live_app/modules/live_room/player/player_controls.dart';
 import 'package:simple_live_app/modules/live_room/widgets/live_contribution_rank_panel.dart';
 import 'package:simple_live_app/services/live_subtitle_service.dart';
+import 'package:simple_live_app/services/marked_user_service.dart';
 import 'package:simple_live_app/widgets/keep_alive_wrapper.dart';
 import 'package:simple_live_app/widgets/net_image.dart';
 import 'package:simple_live_app/widgets/settings/settings_action.dart';
@@ -1016,77 +1017,84 @@ class LiveRoomPage extends GetView<LiveRoomController> {
       );
     }
 
-    Widget buildMessageContent({
-      required TextStyle userStyle,
-      required TextStyle messageStyle,
-    }) {
-      final remark = controller.getUserRemark(message.userName);
-      return _InteractiveChatText(
-        userName: message.userName,
-        remark: remark,
-        message: message.message,
-        imageUrls: AppSettingsController.instance.danmuRenderEmoji.value
-            ? message.imageUrls
-            : null,
-        spans: AppSettingsController.instance.danmuRenderEmoji.value
-            ? message.spans
-            : null,
-        userStyle: userStyle,
-        messageStyle: messageStyle,
-        onUserTap: () => controller.showUserActions(
-          message.userName,
-          messageContent: message.message,
-        ),
-        onUserLongPress: () => controller.copyUserName(message.userName),
-      );
-    }
-
     return Obx(
-      () => AppSettingsController.instance.chatBubbleStyle.value
-          ? Row(
-              mainAxisAlignment: MainAxisAlignment.start,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Flexible(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.blueGrey.withAlpha(25),
-                      //borderRadius: AppStyle.radius8,
-                      borderRadius: const BorderRadius.only(
-                        topRight: Radius.circular(12),
-                        bottomLeft: Radius.circular(12),
-                        bottomRight: Radius.circular(12),
-                      ),
-                    ),
-                    padding:
-                        AppStyle.edgeInsetsA4.copyWith(left: 12, right: 12),
-                    child: buildMessageContent(
-                      userStyle: TextStyle(
-                        color: Colors.grey,
-                        fontSize:
-                            AppSettingsController.instance.chatTextSize.value,
-                      ),
-                      messageStyle: TextStyle(
-                        color:
-                            Get.isDarkMode ? Colors.white : AppColors.black333,
-                        fontSize:
-                            AppSettingsController.instance.chatTextSize.value,
-                      ),
-                    ),
+      () {
+        // 依赖特别关注列表刷新高亮
+        final _ = MarkedUserService.instance.markedUsers.length;
+        final isMarked = controller.isMarkedHighlightUser(message.userId);
+        final fontSize = AppSettingsController.instance.chatTextSize.value;
+        final nameColor =
+            isMarked ? MarkedUserService.highlightColor : Colors.grey;
+        final msgColor = isMarked
+            ? MarkedUserService.highlightColor
+            : (Get.isDarkMode ? Colors.white : AppColors.black333);
+
+        Widget buildMessageContent({
+          required TextStyle userStyle,
+          required TextStyle messageStyle,
+        }) {
+          final remark = controller.getUserRemark(message.userName);
+          return _InteractiveChatText(
+            userName: message.userName,
+            remark: remark,
+            message: message.message,
+            imageUrls: AppSettingsController.instance.danmuRenderEmoji.value
+                ? message.imageUrls
+                : null,
+            spans: AppSettingsController.instance.danmuRenderEmoji.value
+                ? message.spans
+                : null,
+            userStyle: userStyle,
+            messageStyle: messageStyle,
+            onUserTap: () => controller.showUserActions(
+              message.userName,
+              messageContent: message.message,
+              userId: message.userId,
+            ),
+            onUserLongPress: () => controller.copyUserName(message.userName),
+          );
+        }
+
+        final content = buildMessageContent(
+          userStyle: TextStyle(
+            color: nameColor,
+            fontSize: fontSize,
+            fontWeight: isMarked ? FontWeight.bold : FontWeight.normal,
+          ),
+          messageStyle: TextStyle(
+            color: msgColor,
+            fontSize: fontSize,
+            fontWeight: isMarked ? FontWeight.w600 : FontWeight.normal,
+          ),
+        );
+
+        if (!AppSettingsController.instance.chatBubbleStyle.value) {
+          return content;
+        }
+
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Flexible(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isMarked
+                      ? MarkedUserService.highlightColor.withAlpha(40)
+                      : Colors.blueGrey.withAlpha(25),
+                  borderRadius: const BorderRadius.only(
+                    topRight: Radius.circular(12),
+                    bottomLeft: Radius.circular(12),
+                    bottomRight: Radius.circular(12),
                   ),
                 ),
-              ],
-            )
-          : buildMessageContent(
-              userStyle: TextStyle(
-                color: Colors.grey,
-                fontSize: AppSettingsController.instance.chatTextSize.value,
-              ),
-              messageStyle: TextStyle(
-                color: Get.isDarkMode ? Colors.white : AppColors.black333,
-                fontSize: AppSettingsController.instance.chatTextSize.value,
+                padding: AppStyle.edgeInsetsA4.copyWith(left: 12, right: 12),
+                child: content,
               ),
             ),
+          ],
+        );
+      },
     );
   }
 

@@ -194,6 +194,7 @@ class BiliBiliDanmaku implements LiveDanmaku {
           var color = asT<int?>(obj["info"][0][3]) ?? 0;
           if (obj["info"][2] != null && obj["info"][2].length != 0) {
             var username = obj["info"][2][1].toString();
+            var userId = obj["info"][2][0]?.toString() ?? "";
             final spans = _extractSpans(obj["info"], message);
             final imageUrls = spans
                 .where((span) => span.isImage)
@@ -204,6 +205,7 @@ class BiliBiliDanmaku implements LiveDanmaku {
             var liveMsg = LiveMessage(
               type: LiveMessageType.chat,
               userName: username,
+              userId: userId,
               message: textMessage,
               color: color == 0
                   ? LiveMessageColor.white

@@ -152,6 +152,12 @@ class DanmuSettingsView extends GetView<AppSettingsController> {
                 onTap: onTapDanmuShield ??
                     () => Get.toNamed(RoutePath.kSettingsDanmuShield),
               ),
+              AppStyle.divider,
+              SettingsAction(
+                title: "特别关注",
+                subtitle: "标记用户高亮与弹幕记录",
+                onTap: () => Get.toNamed(RoutePath.kSettingsMarkedUser),
+              ),
             ],
           ),
         ),

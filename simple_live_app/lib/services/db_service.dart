@@ -3,6 +3,8 @@ import 'package:hive/hive.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/models/db/follow_user_tag.dart';
 import 'package:simple_live_app/models/db/history.dart';
+import 'package:simple_live_app/models/db/marked_user.dart';
+import 'package:simple_live_app/models/db/marked_user_danmaku.dart';
 import 'package:uuid/uuid.dart';
 import 'package:collection/collection.dart';
 
@@ -11,12 +13,16 @@ class DBService extends GetxService {
   late Box<History> historyBox;
   late Box<FollowUser> followBox;
   late Box<FollowUserTag> tagBox;
+  late Box<MarkedUser> markedUserBox;
+  late Box<MarkedUserDanmaku> markedUserDanmakuBox;
   final Uuid uuid = const Uuid();
 
   Future init() async {
     historyBox = await Hive.openBox("History");
     followBox = await Hive.openBox("FollowUser");
     tagBox = await Hive.openBox("FollowUserTag");
+    markedUserBox = await Hive.openBox("MarkedUser");
+    markedUserDanmakuBox = await Hive.openBox("MarkedUserDanmaku");
   }
 
   // follow_user_tag 相关逻辑
@@ -106,5 +112,68 @@ class DBService extends GetxService {
     var his = historyBox.values.toList();
     his.sort((a, b) => b.updateTime.compareTo(a.updateTime));
     return his;
+  }
+
+  // ---------- MarkedUser ----------
+  MarkedUser? getMarkedUser(String id) {
+    if (markedUserBox.containsKey(id)) {
+      return markedUserBox.get(id);
+    }
+    return null;
+  }
+
+  List<MarkedUser> getMarkedUserList() {
+    final list = markedUserBox.values.toList();
+    list.sort((a, b) =>
+        (b.updatedAt ?? b.createdAt).compareTo(a.updatedAt ?? a.createdAt));
+    return list;
+  }
+
+  Future addOrUpdateMarkedUser(MarkedUser user) async {
+    await markedUserBox.put(user.id, user);
+  }
+
+  Future deleteMarkedUser(String id) async {
+    await markedUserBox.delete(id);
+  }
+
+  // ---------- MarkedUserDanmaku ----------
+  Future addMarkedUserDanmaku(MarkedUserDanmaku item) async {
+    await markedUserDanmakuBox.put(item.id, item);
+  }
+
+  List<MarkedUserDanmaku> getDanmakuByUser(String siteId, String userId) {
+    final list = markedUserDanmakuBox.values
+        .where((e) => e.siteId == siteId && e.userId == userId)
+        .toList();
+    list.sort((a, b) => b.sentAt.compareTo(a.sentAt));
+    return list;
+  }
+
+  Future deleteDanmakuByUser(String siteId, String userId) async {
+    final keys = markedUserDanmakuBox.keys.where((key) {
+      final item = markedUserDanmakuBox.get(key);
+      return item != null && item.siteId == siteId && item.userId == userId;
+    }).toList();
+    await markedUserDanmakuBox.deleteAll(keys);
+  }
+
+  Future clearAllMarkedUserDanmaku() async {
+    await markedUserDanmakuBox.clear();
+  }
+
+  Future trimDanmakuForUser(String siteId, String userId, int maxCount) async {
+    final list = getDanmakuByUser(siteId, userId);
+    if (list.length <= maxCount) return;
+    final toRemove = list.skip(maxCount).map((e) => e.id).toList();
+    await markedUserDanmakuBox.deleteAll(toRemove);
+  }
+
+  Future trimDanmakuTotal(int maxCount) async {
+    final list = markedUserDanmakuBox.values.toList();
+    if (list.length <= maxCount) return;
+    list.sort((a, b) => b.sentAt.compareTo(a.sentAt));
+    final toRemove = list.skip(maxCount).map((e) => e.id).toList();
+    await markedUserDanmakuBox.deleteAll(toRemove);
   }
 }
