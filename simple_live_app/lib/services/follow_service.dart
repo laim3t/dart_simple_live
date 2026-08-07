@@ -1090,7 +1090,7 @@ class FollowService extends GetxService {
     } finally {
       if (generation == _updateGeneration) {
         updating.value = false;
-        _scheduleRefreshProgressReset();
+        _finishRefreshProgressLifecycle(generation);
       }
     }
   }
