@@ -1,0 +1,27 @@
+﻿name: build-windows-only
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/marked-user-desktop-volume
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.38.x"
+          channel: stable
+          cache: true
+      - run: flutter config --enable-windows-desktop
+      - name: Build
+        run: |
+          cd simple_live_app
+          flutter pub get
+          flutter build windows --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: simple_live_app/build/windows/x64/runner/Release/**
+          if-no-files-found: error
