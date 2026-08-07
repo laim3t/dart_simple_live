@@ -556,6 +556,51 @@ class FollowUserPage extends GetView<FollowUserController> {
                       controller.setRefreshOnEnter(value);
                     },
                   ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "关注刷新模式",
+                    style: Get.textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Obx(
+                    () => Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        ChoiceChip(
+                          label: const Text("增强（稳妥）"),
+                          selected: settings.followRefreshMode.value ==
+                              AppSettingsController.kFollowRefreshModeEnhanced,
+                          onSelected: (_) {
+                            settings.setFollowRefreshMode(
+                              AppSettingsController.kFollowRefreshModeEnhanced,
+                            );
+                          },
+                        ),
+                        ChoiceChip(
+                          label: const Text("快速（旧版）"),
+                          selected: settings.followRefreshMode.value ==
+                              AppSettingsController.kFollowRefreshModeLegacy,
+                          onSelected: (_) {
+                            settings.setFollowRefreshMode(
+                              AppSettingsController.kFollowRefreshModeLegacy,
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Obx(
+                    () => Text(
+                      settings.isLegacyFollowRefresh
+                          ? "当前：快速模式（高并发，接近旧版 1.11.x）"
+                          : "当前：增强模式（抖音限速、补齐封面更完整）",
+                      style: Get.textTheme.bodySmall?.copyWith(
+                        color: Colors.grey,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),

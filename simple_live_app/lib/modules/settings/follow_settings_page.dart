@@ -24,6 +24,35 @@ class FollowSettingsPage extends GetView<AppSettingsController> {
             child: Column(
               children: [
                 Obx(
+                  () => SettingsMenu<String>(
+                    title: "关注刷新模式",
+                    value: controller.followRefreshMode.value,
+                    valueMap: const {
+                      AppSettingsController.kFollowRefreshModeEnhanced:
+                          "增强（稳妥/防风控）",
+                      AppSettingsController.kFollowRefreshModeLegacy:
+                          "快速（旧版逻辑）",
+                    },
+                    onChanged: (value) {
+                      controller.setFollowRefreshMode(value);
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: AppStyle.edgeInsetsH16.copyWith(bottom: 8, top: 4),
+                  child: Obx(
+                    () => Text(
+                      controller.isLegacyFollowRefresh
+                          ? "快速模式：高并发、无抖音限速、不做完整封面补齐流水线，速度接近旧版 1.11.x；抖音关注过多时可能触发平台限制。"
+                          : "增强模式：并发更保守、抖音单独限速、手动刷新会补齐封面/标题，更稳但更慢。",
+                      style: Get.textTheme.bodySmall?.copyWith(
+                        color: Colors.grey,
+                      ),
+                    ),
+                  ),
+                ),
+                AppStyle.divider,
+                Obx(
                   () => SettingsSwitch(
                     value: controller.autoUpdateFollowEnable.value,
                     title: "自动更新关注直播状态",
@@ -71,6 +100,19 @@ class FollowSettingsPage extends GetView<AppSettingsController> {
                     onChanged: (value) {
                       controller.setUpdateFollowThreadCount(value);
                     },
+                  ),
+                ),
+                Padding(
+                  padding: AppStyle.edgeInsetsH16.copyWith(bottom: 8, top: 4),
+                  child: Obx(
+                    () => Text(
+                      controller.isLegacyFollowRefresh
+                          ? "快速模式「自动」会按 CPU 估算并发（约 4～20）；手动 1～8 可再调。"
+                          : "增强模式「自动」并发最高约 4；手动 1～8 可再调。",
+                      style: Get.textTheme.bodySmall?.copyWith(
+                        color: Colors.grey,
+                      ),
+                    ),
                   ),
                 ),
                 AppStyle.divider,

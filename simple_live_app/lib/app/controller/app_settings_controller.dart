@@ -336,6 +336,12 @@ class AppSettingsController extends GetxController {
         0,
       ),
     );
+    followRefreshMode.value = _normalizeFollowRefreshMode(
+      LocalStorageService.instance.getValue(
+        LocalStorageService.kFollowRefreshMode,
+        kFollowRefreshModeEnhanced,
+      ),
+    );
     followPageSize.value = _normalizeFollowPageSize(
       LocalStorageService.instance.getValue(
         LocalStorageService.kFollowPageSize,
@@ -2518,6 +2524,28 @@ class AppSettingsController extends GetxController {
     updateFollowThreadCount.value = value;
     LocalStorageService.instance
         .setValue(LocalStorageService.kUpdateFollowThreadCount, value);
+  }
+
+  /// 关注刷新模式：enhanced=增强（稳妥防风控），legacy=旧版（快速）
+  static const String kFollowRefreshModeEnhanced = "enhanced";
+  static const String kFollowRefreshModeLegacy = "legacy";
+  var followRefreshMode = kFollowRefreshModeEnhanced.obs;
+
+  bool get isLegacyFollowRefresh =>
+      followRefreshMode.value == kFollowRefreshModeLegacy;
+
+  String _normalizeFollowRefreshMode(String value) {
+    if (value == kFollowRefreshModeLegacy) {
+      return kFollowRefreshModeLegacy;
+    }
+    return kFollowRefreshModeEnhanced;
+  }
+
+  void setFollowRefreshMode(String e) {
+    final value = _normalizeFollowRefreshMode(e);
+    followRefreshMode.value = value;
+    LocalStorageService.instance
+        .setValue(LocalStorageService.kFollowRefreshMode, value);
   }
 
   static const int kFollowPageSizeDefault = 200;

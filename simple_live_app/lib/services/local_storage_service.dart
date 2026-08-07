@@ -115,6 +115,8 @@ class LocalStorageService extends GetxService {
   static const String kAutoUpdateFollowEnable = "AutoUpdateFollowEnable";
   static const String kUpdateFollowDuration = "AutoUpdateFollowDuration";
   static const String kUpdateFollowThreadCount = "UpdateFollowThreadCount";
+  /// 关注刷新模式：enhanced=增强稳妥，legacy=旧版快速
+  static const String kFollowRefreshMode = "FollowRefreshMode";
   static const String kFollowPageSize = "FollowPageSize";
   static const String kFollowRefreshTaskState = "FollowRefreshTaskState";
   static const String kFollowRefreshTaskTargets = "FollowRefreshTaskTargets";

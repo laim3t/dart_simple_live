@@ -194,7 +194,8 @@ class FollowService extends GetxService {
   }
 
   /// 获取关注刷新并发数。
-  /// 0 = 自动，自动最多 4；手动 1-8 直接生效。
+  /// - 增强模式：0=自动最多 4；手动 1-8
+  /// - 旧版快速模式：0=按 CPU 估算 4-20；手动 1-8
   int getOptimalConcurrency({
     int? totalCount,
   }) {
@@ -206,6 +207,11 @@ class FollowService extends GetxService {
         AppSettingsController.instance.effectiveUpdateFollowThreadCount;
     if (manual > 0) {
       return manual.clamp(1, count).toInt();
+    }
+    // 旧版快速：更高并发，贴近 1.11.x 逻辑
+    if (AppSettingsController.instance.isLegacyFollowRefresh) {
+      final optimal = (Platform.numberOfProcessors * 2.5).round();
+      return optimal.clamp(4, 20).clamp(1, count).toInt();
     }
     var concurrency = 2;
     if (count <= 50) {
@@ -932,6 +938,18 @@ class FollowService extends GetxService {
             includeAllNormals: includeAllNormals,
           )
         : buildPageFrontTargets(normalTargets);
+
+    // 用户可选：旧版快速刷新 / 增强稳妥刷新
+    if (AppSettingsController.instance.isLegacyFollowRefresh) {
+      await _refreshSelectedStatusLegacy(
+        targets,
+        force: force,
+        scope: resolvedScope,
+        allowDetailRefresh: allowDetailRefresh,
+      );
+      return;
+    }
+
     await _refreshStatusTargets(
       targets,
       force: force,
@@ -948,6 +966,183 @@ class FollowService extends GetxService {
       refreshProgressUi: true,
       reconcileDouyinIdentity: true,
     );
+  }
+
+  /// 旧版快速刷新：高并发、无抖音限速、不做第二阶段封面补齐链路。
+  /// 逻辑对齐 1.11.x：getLiveStatus + 开播时再 getRoomDetail(开播时间)。
+  Future<void> _refreshSelectedStatusLegacy(
+    List<FollowUser> targets, {
+    required bool force,
+    required FollowRefreshScope scope,
+    required bool allowDetailRefresh,
+  }) async {
+    final now = DateTime.now();
+    final lastStartedAt = _lastUpdateStatusStartedAt;
+    if (!force &&
+        lastStartedAt != null &&
+        now.difference(lastStartedAt) < updateStatusCooldown) {
+      Log.logPrint("旧版刷新：自动刷新仍在冷却中，跳过");
+      updating.value = false;
+      _resetRefreshProgress();
+      filterData();
+      return;
+    }
+    if (updating.value &&
+        refreshProgress.value.active &&
+        refreshProgress.value.scopeKey == scope.scopeKey &&
+        !refreshProgress.value.completed) {
+      Log.logPrint("旧版刷新：同一任务进行中，复用进度 ${scope.scopeKey}");
+      return;
+    }
+
+    _lastUpdateStatusStartedAt = now;
+    final generation = ++_updateGeneration;
+    final automatic = scope.automatic;
+    _cancelRefreshProgressReset();
+    updating.value = true;
+
+    if (targets.isEmpty) {
+      updating.value = false;
+      _resetRefreshProgress();
+      filterData();
+      return;
+    }
+
+    final concurrency = getOptimalConcurrency(totalCount: targets.length);
+    Log.logPrint(
+      "旧版快速刷新开始：并发=$concurrency 模式=${_getConcurrencyMode()} "
+      "目标=${targets.length} scope=${scope.scopeKey} "
+      "detail=${allowDetailRefresh && !automatic}",
+    );
+
+    _setRefreshProgress(
+      active: true,
+      automatic: automatic,
+      scopeKey: scope.scopeKey,
+      stage: "快速刷新开播状态",
+      current: 0,
+      total: targets.length,
+    );
+
+    final ordered = interleaveByPlatform(
+      deprioritizeCurrentRoom(targets.toList()),
+    );
+    final taskQueue = Queue<FollowUser>.from(ordered);
+    var completed = 0;
+    var successCount = 0;
+    var failedCount = 0;
+
+    void updateProgress({required bool done}) {
+      _setRefreshProgress(
+        active: !done,
+        automatic: automatic,
+        scopeKey: scope.scopeKey,
+        stage: done ? "快速刷新完成" : "快速刷新开播状态",
+        current: completed,
+        total: targets.length,
+        successCount: successCount,
+        failedCount: failedCount,
+        detail: "成功 $successCount  失败 $failedCount",
+        completed: done,
+      );
+    }
+
+    Future<void> worker() async {
+      while (taskQueue.isNotEmpty) {
+        if (generation != _updateGeneration) {
+          return;
+        }
+        final item = taskQueue.removeFirst();
+        final ok = await _updateLiveStatusLegacy(
+          item,
+          generation: generation,
+          fetchDetailWhenLiving: allowDetailRefresh && !automatic,
+        );
+        if (generation != _updateGeneration) {
+          return;
+        }
+        completed++;
+        if (ok) {
+          successCount++;
+        } else {
+          failedCount++;
+        }
+        if (completed % 5 == 0 || taskQueue.isEmpty) {
+          updateProgress(done: false);
+        }
+      }
+    }
+
+    try {
+      final workers = <Future<void>>[];
+      for (var i = 0; i < concurrency; i++) {
+        workers.add(worker());
+      }
+      await Future.wait(workers);
+      if (generation != _updateGeneration) {
+        return;
+      }
+      updateProgress(done: true);
+      filterData();
+      Log.logPrint(
+        "旧版快速刷新完成：success=$successCount failed=$failedCount total=${targets.length}",
+      );
+    } finally {
+      if (generation == _updateGeneration) {
+        updating.value = false;
+        _scheduleRefreshProgressReset();
+      }
+    }
+  }
+
+  /// 旧版单条状态更新：无抖音限速、无身份校正、无通知链路复杂度。
+  Future<bool> _updateLiveStatusLegacy(
+    FollowUser item, {
+    required int generation,
+    required bool fetchDetailWhenLiving,
+  }) async {
+    try {
+      final site = Sites.allSites[item.siteId]!;
+      final isLiving = await site.liveSite.getLiveStatus(roomId: item.roomId);
+      if (generation != _updateGeneration) {
+        return false;
+      }
+      item.liveStatus.value = isLiving ? 2 : 1;
+      if (isLiving && fetchDetailWhenLiving) {
+        try {
+          final detail = await site.liveSite.getRoomDetail(roomId: item.roomId);
+          if (generation != _updateGeneration) {
+            return true;
+          }
+          item.liveStartTime = detail.showTime;
+          // 顺带刷新标题/封面（轻量，不做增强版整段 metadata 流水线）
+          if (detail.userName.trim().isNotEmpty) {
+            item.userName = detail.userName;
+          }
+          if (detail.userAvatar.trim().isNotEmpty) {
+            item.face = detail.userAvatar;
+          }
+          if (detail.title.trim().isNotEmpty) {
+            item.roomTitle = detail.title;
+          }
+          if (detail.cover.trim().isNotEmpty) {
+            item.roomCover = detail.cover;
+          }
+        } catch (e) {
+          Log.logPrint(e);
+        }
+      } else if (!isLiving) {
+        item.liveStartTime = null;
+      }
+      return true;
+    } catch (e) {
+      Log.logPrint(e);
+      if (generation == _updateGeneration) {
+        item.liveStatus.value = 0;
+        item.liveStartTime = null;
+      }
+      return false;
+    }
   }
 
   Future<void> _refreshStatusTargets(
