@@ -522,35 +522,97 @@ mixin PlayerGestureControlMixin
   var _currentVolume = 0.0;
   var _currentBrightness = 1.0;
   var verStartPosition = 0.0;
+  /// 手势计算用的高度跨度（拖过半屏约从 0%→100%）
+  var _verticalDragExtent = 1.0;
+  /// 是否使用 localPosition（桌面播放区域坐标更准）
+  var _useLocalDragPosition = false;
 
   DelayedThrottle? throttle;
 
   /// 竖向手势开始
-  void onVerticalDragStart(DragStartDetails details) async {
+  /// [viewportSize] 为播放区域尺寸；桌面端传入后用 local 坐标，避免全屏窗口坐标偏差
+  void onVerticalDragStart(
+    DragStartDetails details, {
+    Size? viewportSize,
+  }) async {
     if (lockControlsState.value && fullScreenState.value) {
       return;
     }
 
-    final dy = details.globalPosition.dy;
-    // 开始位置必须是中间2/4的位置
-    if (dy < Get.height * 0.25 || dy > Get.height * 0.75) {
+    final width = (viewportSize?.width ?? Get.width);
+    final height = (viewportSize?.height ?? Get.height);
+    if (width <= 0 || height <= 0) {
+      return;
+    }
+
+    final localX = details.localPosition.dx;
+    final localY = details.localPosition.dy;
+    // Windows/Linux：仅左右两侧约 28% 宽响应，中间留给点击/双击等
+    if (Platform.isWindows || Platform.isLinux) {
+      final sideGestureWidth = width * 0.28;
+      if (localX > sideGestureWidth && localX < width - sideGestureWidth) {
+        return;
+      }
+    }
+
+    _useLocalDragPosition = viewportSize != null;
+    final dy = _useLocalDragPosition ? localY : details.globalPosition.dy;
+    // 开始位置必须是中间 2/4 的位置
+    if (dy < height * 0.25 || dy > height * 0.75) {
       return;
     }
 
     verStartPosition = dy;
-    leftVerticalDrag = details.globalPosition.dx < Get.width / 2;
+    _verticalDragExtent = height * 0.5;
+    if (_verticalDragExtent < 1) {
+      _verticalDragExtent = 1;
+    }
+    final dx = _useLocalDragPosition ? localX : details.globalPosition.dx;
+    leftVerticalDrag = dx < width / 2;
 
     throttle = DelayedThrottle(200);
-
+    lastVolume = -1;
     verticalDragging = true;
+
+    // 桌面：调播放器音量；手机：调系统音量 + 亮度
+    if (Platform.isWindows || Platform.isLinux) {
+      showGestureTip.value = true;
+      if (leftVerticalDrag) {
+        // 桌面左侧仍尝试亮度（多数环境无感，不阻断）
+        try {
+          _currentBrightness = await ScreenBrightness.instance.application;
+        } catch (_) {
+          _currentBrightness = 1.0;
+        }
+      } else {
+        // 右侧：播放器内部音量 0~100
+        final currentPlayerVolume = player.state.volume;
+        final base = currentPlayerVolume > 0
+            ? currentPlayerVolume
+            : AppSettingsController.instance.playerVolume.value;
+        _currentVolume = (base.clamp(0.0, 100.0)) / 100.0;
+      }
+      return;
+    }
+
     if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
       showGestureTip.value = true;
     }
     if (Platform.isAndroid || Platform.isIOS) {
-      _currentVolume = await VolumeController.instance.getVolume();
+      try {
+        _currentVolume = await VolumeController.instance.getVolume();
+      } catch (e) {
+        Log.logPrint(e);
+        verticalDragging = false;
+        return;
+      }
     }
     if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
-      _currentBrightness = await ScreenBrightness.instance.application;
+      try {
+        _currentBrightness = await ScreenBrightness.instance.application;
+      } catch (e) {
+        Log.logPrint(e);
+      }
     }
   }
 
@@ -560,18 +622,22 @@ mixin PlayerGestureControlMixin
       return;
     }
     if (verticalDragging == false) return;
-    if (!Platform.isAndroid && !Platform.isIOS) {
+    // 旧版仅安卓/iOS；此处补上 Windows/Linux，才能在桌面拖动调音量
+    if (!Platform.isAndroid &&
+        !Platform.isIOS &&
+        !Platform.isWindows &&
+        !Platform.isLinux) {
       return;
     }
-    //String text = "";
-    //double value = 0.0;
 
-    Log.logPrint("$verStartPosition/${e.globalPosition.dy}");
+    final dragPosition =
+        _useLocalDragPosition ? e.localPosition.dy : e.globalPosition.dy;
+    Log.logPrint("$verStartPosition/$dragPosition");
 
     if (leftVerticalDrag) {
-      setGestureBrightness(e.globalPosition.dy);
+      setGestureBrightness(dragPosition);
     } else {
-      setGestureVolume(e.globalPosition.dy);
+      setGestureVolume(dragPosition);
     }
   }
 
@@ -581,14 +647,14 @@ mixin PlayerGestureControlMixin
     double value = 0.0;
     double seek;
     if (dy > verStartPosition) {
-      value = ((dy - verStartPosition) / (Get.height * 0.5));
+      value = ((dy - verStartPosition) / _verticalDragExtent);
 
       seek = _currentVolume - value;
       if (seek < 0) {
         seek = 0;
       }
     } else {
-      value = ((dy - verStartPosition) / (Get.height * 0.5));
+      value = ((dy - verStartPosition) / _verticalDragExtent);
       seek = value.abs() + _currentVolume;
       if (seek > 1) {
         seek = 1;
@@ -601,6 +667,7 @@ mixin PlayerGestureControlMixin
     lastVolume = volume;
     // update UI outside throttle to make it more fluent
     gestureTipText.value = "音量 $volume%";
+    showGestureTip.value = true;
     throttle?.invoke(() async => await _realSetVolume(volume));
   }
 
@@ -611,31 +678,44 @@ mixin PlayerGestureControlMixin
 
   Future _realSetVolume(int volume) async {
     Log.logPrint(volume);
-    VolumeController.instance.setVolume(volume / 100);
+    // Windows/Linux：改播放器音量并持久化（与音量横条一致）
+    if (Platform.isWindows || Platform.isLinux) {
+      await player.setVolume(volume.toDouble());
+      AppSettingsController.instance.setPlayerVolume(volume.toDouble());
+      return;
+    }
+    // 手机手势：系统音量
+    await VolumeController.instance.setVolume(volume / 100);
   }
 
   void setGestureBrightness(double dy) {
     double value = 0.0;
     if (dy > verStartPosition) {
-      value = ((dy - verStartPosition) / (Get.height * 0.5));
+      value = ((dy - verStartPosition) / _verticalDragExtent);
 
       var seek = _currentBrightness - value;
       if (seek < 0) {
         seek = 0;
       }
-      ScreenBrightness.instance.setApplicationScreenBrightness(seek);
+      try {
+        ScreenBrightness.instance.setApplicationScreenBrightness(seek);
+      } catch (_) {}
 
       gestureTipText.value = "亮度 ${(seek * 100).toInt()}%";
+      showGestureTip.value = true;
       Log.logPrint(value);
     } else {
-      value = ((dy - verStartPosition) / (Get.height * 0.5));
+      value = ((dy - verStartPosition) / _verticalDragExtent);
       var seek = value.abs() + _currentBrightness;
       if (seek > 1) {
         seek = 1;
       }
 
-      ScreenBrightness.instance.setApplicationScreenBrightness(seek);
+      try {
+        ScreenBrightness.instance.setApplicationScreenBrightness(seek);
+      } catch (_) {}
       gestureTipText.value = "亮度 ${(seek * 100).toInt()}%";
+      showGestureTip.value = true;
       Log.logPrint(value);
     }
   }
@@ -648,6 +728,15 @@ mixin PlayerGestureControlMixin
     throttle = null;
     verticalDragging = false;
     leftVerticalDrag = false;
+    _useLocalDragPosition = false;
+    showGestureTip.value = false;
+  }
+
+  void onVerticalDragCancel() {
+    throttle = null;
+    verticalDragging = false;
+    leftVerticalDrag = false;
+    _useLocalDragPosition = false;
     showGestureTip.value = false;
   }
 }

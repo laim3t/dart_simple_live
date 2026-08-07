@@ -78,38 +78,42 @@ Widget buildFullControls(
           ),
         ),
         Positioned.fill(
-          child: GestureDetector(
-            onTap: controller.onTap,
-            onDoubleTapDown: controller.onDoubleTap,
-            onLongPress: () {
-              if (controller.lockControlsState.value) {
-                return;
-              }
-              showFollowUser(controller);
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final viewportSize = Size(
+                constraints.hasBoundedWidth
+                    ? constraints.maxWidth
+                    : MediaQuery.sizeOf(context).width,
+                constraints.hasBoundedHeight
+                    ? constraints.maxHeight
+                    : MediaQuery.sizeOf(context).height,
+              );
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: controller.onTap,
+                onDoubleTapDown: controller.onDoubleTap,
+                onLongPress: () {
+                  if (controller.lockControlsState.value) {
+                    return;
+                  }
+                  showFollowUser(controller);
+                },
+                onVerticalDragStart: (details) =>
+                    controller.onVerticalDragStart(
+                  details,
+                  viewportSize: viewportSize,
+                ),
+                onVerticalDragUpdate: controller.onVerticalDragUpdate,
+                onVerticalDragEnd: controller.onVerticalDragEnd,
+                onVerticalDragCancel: controller.onVerticalDragCancel,
+                child: MouseRegion(
+                  onHover: (PointerHoverEvent event) {
+                    controller.onHover(event, videoState.context);
+                  },
+                  child: const SizedBox.expand(),
+                ),
+              );
             },
-            onVerticalDragStart: controller.onVerticalDragStart,
-            onVerticalDragUpdate: controller.onVerticalDragUpdate,
-            onVerticalDragEnd: controller.onVerticalDragEnd,
-            child: MouseRegion(
-              onHover: (PointerHoverEvent event) {
-                controller.onHover(event, videoState.context);
-              },
-              child: Container(
-                width: double.infinity,
-                height: double.infinity,
-                color: Colors.transparent,
-                // child: Visibility(
-                //   //拖拽区域
-                //   visible: controller.smallWindowState.value,
-                //   child: DragToMoveArea(
-                //       child: Container(
-                //     width: double.infinity,
-                //     height: double.infinity,
-                //     color: Colors.transparent,
-                //   )),
-                // ),
-              ),
-            ),
           ),
         ),
 
@@ -464,21 +468,34 @@ Widget buildControls(
         ),
       ),
       Positioned.fill(
-        child: GestureDetector(
-          onTap: controller.onTap,
-          onDoubleTapDown: controller.onDoubleTap,
-          onVerticalDragStart: controller.onVerticalDragStart,
-          onVerticalDragUpdate: controller.onVerticalDragUpdate,
-          onVerticalDragEnd: controller.onVerticalDragEnd,
-          //onLongPress: controller.showDebugInfo,
-          child: MouseRegion(
-            onEnter: controller.onEnter,
-            child: Container(
-              width: double.infinity,
-              height: double.infinity,
-              color: Colors.transparent,
-            ),
-          ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final viewportSize = Size(
+              constraints.hasBoundedWidth
+                  ? constraints.maxWidth
+                  : MediaQuery.sizeOf(context).width,
+              constraints.hasBoundedHeight
+                  ? constraints.maxHeight
+                  : MediaQuery.sizeOf(context).height,
+            );
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: controller.onTap,
+              onDoubleTapDown: controller.onDoubleTap,
+              onVerticalDragStart: (details) => controller.onVerticalDragStart(
+                details,
+                viewportSize: viewportSize,
+              ),
+              onVerticalDragUpdate: controller.onVerticalDragUpdate,
+              onVerticalDragEnd: controller.onVerticalDragEnd,
+              onVerticalDragCancel: controller.onVerticalDragCancel,
+              //onLongPress: controller.showDebugInfo,
+              child: MouseRegion(
+                onEnter: controller.onEnter,
+                child: const SizedBox.expand(),
+              ),
+            );
+          },
         ),
       ),
       Obx(
