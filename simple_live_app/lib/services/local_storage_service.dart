@@ -160,18 +160,49 @@ class LocalStorageService extends GetxService {
 
   T getValue<T>(dynamic key, T defaultValue) {
     try {
-      final value = settingsBox.get(key, defaultValue: defaultValue) as T;
-      Log.d("Get LocalStorage: $key");
-      return value;
+      if (!settingsBox.containsKey(key)) {
+        Log.d("Get LocalStorage: $key (missing, default=$defaultValue)");
+        return defaultValue;
+      }
+      final raw = settingsBox.get(key);
+      if (raw == null) {
+        return defaultValue;
+      }
+      // String 设置项：避免 Hive 动态类型 as String 偶发失败导致回落到默认值
+      if (defaultValue is String) {
+        return raw.toString() as T;
+      }
+      if (raw is T) {
+        return raw;
+      }
+      // bool / int 等常见兼容
+      if (defaultValue is bool) {
+        if (raw is bool) return raw as T;
+        if (raw is num) return (raw != 0) as T;
+        if (raw is String) {
+          final s = raw.toLowerCase();
+          if (s == "true" || s == "1") return true as T;
+          if (s == "false" || s == "0") return false as T;
+        }
+      }
+      if (defaultValue is int && raw is num) {
+        return raw.toInt() as T;
+      }
+      if (defaultValue is double && raw is num) {
+        return raw.toDouble() as T;
+      }
+      return raw as T;
     } catch (e) {
-      Log.logPrint(e);
+      Log.logPrint("Get LocalStorage failed: $key -> $e");
       return defaultValue;
     }
   }
 
   Future setValue<T>(dynamic key, T value) async {
-    Log.d("Set LocalStorage: $key");
-    return await settingsBox.put(key, value);
+    Log.d("Set LocalStorage: $key = $value");
+    await settingsBox.put(key, value);
+    // 确保立即落盘，避免强杀进程时设置丢失
+    await settingsBox.flush();
   }
 
   Future removeValue<T>(dynamic key) async {

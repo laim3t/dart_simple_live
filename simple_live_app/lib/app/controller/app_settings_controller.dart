@@ -336,15 +336,14 @@ class AppSettingsController extends GetxController {
         0,
       ),
     );
-    followRefreshMode.value = _normalizeFollowRefreshMode(
-      LocalStorageService.instance.getValue(
-        LocalStorageService.kFollowRefreshMode,
-        kFollowRefreshModeEnhanced,
-      ),
-    );
+    followRefreshMode.value = _loadFollowRefreshMode();
     // 默认 false：快速模式下仍保护抖音；开启后=极速不限制抖音
     legacyFollowUnrestrictedDouyin.value = LocalStorageService.instance
         .getValue(LocalStorageService.kLegacyFollowUnrestrictedDouyin, false);
+    Log.i(
+      "Loaded followRefreshMode=${followRefreshMode.value} "
+      "unrestrictedDouyin=${legacyFollowUnrestrictedDouyin.value}",
+    );
     followPageSize.value = _normalizeFollowPageSize(
       LocalStorageService.instance.getValue(
         LocalStorageService.kFollowPageSize,
@@ -2537,18 +2536,48 @@ class AppSettingsController extends GetxController {
   bool get isLegacyFollowRefresh =>
       followRefreshMode.value == kFollowRefreshModeLegacy;
 
+  String _loadFollowRefreshMode() {
+    final box = LocalStorageService.instance.settingsBox;
+    final key = LocalStorageService.kFollowRefreshMode;
+    if (!box.containsKey(key)) {
+      return kFollowRefreshModeEnhanced;
+    }
+    final raw = box.get(key);
+    return _normalizeFollowRefreshMode(raw?.toString() ?? "");
+  }
+
   String _normalizeFollowRefreshMode(String value) {
-    if (value == kFollowRefreshModeLegacy) {
+    final v = value.trim().toLowerCase();
+    // 兼容可能的别名
+    if (v == kFollowRefreshModeLegacy ||
+        v == "fast" ||
+        v == "quick" ||
+        v == "old") {
       return kFollowRefreshModeLegacy;
     }
     return kFollowRefreshModeEnhanced;
   }
 
-  void setFollowRefreshMode(String e) {
+  Future<void> setFollowRefreshMode(String e) async {
     final value = _normalizeFollowRefreshMode(e);
     followRefreshMode.value = value;
-    LocalStorageService.instance
+    await LocalStorageService.instance
         .setValue(LocalStorageService.kFollowRefreshMode, value);
+    // 二次校验，避免静默写失败
+    final loaded = _loadFollowRefreshMode();
+    if (loaded != value) {
+      Log.e(
+        "followRefreshMode persist mismatch: wrote=$value read=$loaded",
+        StackTrace.current,
+      );
+      // 再写一次
+      await LocalStorageService.instance
+          .setValue(LocalStorageService.kFollowRefreshMode, value);
+    }
+    Log.i("Saved followRefreshMode=$value (verify=${_loadFollowRefreshMode()})");
+    SmartDialog.showToast(
+      value == kFollowRefreshModeLegacy ? "已保存：快速模式" : "已保存：增强模式",
+    );
   }
 
   /// 快速模式专用：true=极速不限制抖音；false=抖音保护（默认）
@@ -2558,10 +2587,13 @@ class AppSettingsController extends GetxController {
   bool get isLegacyDouyinProtected =>
       isLegacyFollowRefresh && !legacyFollowUnrestrictedDouyin.value;
 
-  void setLegacyFollowUnrestrictedDouyin(bool e) {
+  Future<void> setLegacyFollowUnrestrictedDouyin(bool e) async {
     legacyFollowUnrestrictedDouyin.value = e;
-    LocalStorageService.instance
+    await LocalStorageService.instance
         .setValue(LocalStorageService.kLegacyFollowUnrestrictedDouyin, e);
+    SmartDialog.showToast(
+      e ? "已开启：极速（不限制抖音）" : "已关闭极速：抖音保护中",
+    );
   }
 
   static const int kFollowPageSizeDefault = 200;
