@@ -1047,19 +1047,12 @@ class FollowService extends GetxService {
       );
     }
 
-    _setRefreshProgress(
-      active: true,
-      automatic: automatic,
-      scopeKey: scope.scopeKey,
-      stage: protectDouyin ? "快速刷新（抖音保护）" : "极速刷新（不限制抖音）",
-      current: 0,
-      total: targets.length,
-    );
-
+    // 分两阶段：先非抖音（尽快展示）→ 再抖音（刷新完再更新列表）
     var completed = 0;
     var successCount = 0;
     var failedCount = 0;
     var limitedCount = 0;
+    var phaseLabel = "正在刷新非抖音平台";
 
     void updateProgress({required bool done}) {
       final detailParts = <String>[
@@ -1071,9 +1064,7 @@ class FollowService extends GetxService {
         active: !done,
         automatic: automatic,
         scopeKey: scope.scopeKey,
-        stage: done
-            ? "快速刷新完成"
-            : (protectDouyin ? "快速刷新（抖音保护）" : "极速刷新（不限制抖音）"),
+        stage: done ? "快速刷新完成" : phaseLabel,
         current: completed,
         total: targets.length,
         successCount: successCount,
@@ -1087,6 +1078,7 @@ class FollowService extends GetxService {
       required List<FollowUser> items,
       required int concurrency,
       DouyinFollowRefreshLimiter? douyinLimiter,
+      bool publishUiIncrementally = false,
     }) async {
       if (items.isEmpty || concurrency <= 0) {
         return;
@@ -1120,6 +1112,11 @@ class FollowService extends GetxService {
           if (completed % 5 == 0 || queue.isEmpty) {
             updateProgress(done: false);
           }
+          // 非抖音阶段：边刷边刷新列表排序/开播分组，不必等整批结束
+          if (publishUiIncrementally &&
+              (completed % 10 == 0 || queue.isEmpty)) {
+            filterData();
+          }
         }
       }
 
@@ -1132,38 +1129,73 @@ class FollowService extends GetxService {
     }
 
     try {
-      if (!protectDouyin) {
-        // 极速：所有平台同一队列、高并发、无限速
+      updateProgress(done: false);
+
+      // —— 阶段 1：非抖音，先刷完并展示 ——
+      if (nonDouyin.isNotEmpty) {
+        phaseLabel = protectDouyin
+            ? "正在刷新非抖音平台（完成后显示）"
+            : "正在刷新非抖音平台";
+        updateProgress(done: false);
         await runQueue(
-          items: ordered,
-          concurrency: getOptimalConcurrency(totalCount: ordered.length),
+          items: nonDouyin,
+          concurrency: nonDouyinConcurrency,
+          publishUiIncrementally: true,
         );
-      } else {
-        // 默认：非抖音快速 + 抖音单独限速（并行，不互相拖死）
-        final douyinLimiter = douyinItems.isEmpty
-            ? null
-            : DouyinFollowRefreshLimiter.forTargetCount(douyinItems.length);
-        await Future.wait([
-          runQueue(
-            items: nonDouyin,
-            concurrency: nonDouyin.isEmpty ? 0 : nonDouyinConcurrency,
-          ),
-          runQueue(
-            items: douyinItems,
-            concurrency: douyinConcurrency,
-            douyinLimiter: douyinLimiter,
-          ),
-        ]);
+        if (generation != _updateGeneration) {
+          return;
+        }
+        // 非抖音整批结束后，立刻刷新列表（抖音仍是旧状态/加载中观感）
+        filterData();
+        phaseLabel = douyinItems.isEmpty
+            ? "快速刷新完成"
+            : (protectDouyin
+                ? "非抖音已更新，正在限速刷新抖音…"
+                : "非抖音已更新，正在刷新抖音…");
+        updateProgress(done: false);
+        if (douyinItems.isNotEmpty && !automatic) {
+          SmartDialog.showToast(
+            protectDouyin
+                ? "其它平台已刷新，正在保护模式刷新抖音…"
+                : "其它平台已刷新，正在刷新抖音…",
+          );
+        }
+      }
+
+      // —— 阶段 2：抖音，整批完成后再更新列表 ——
+      if (douyinItems.isNotEmpty) {
+        phaseLabel = protectDouyin
+            ? "正在限速刷新抖音（完成后更新）"
+            : "正在刷新抖音（完成后更新）";
+        updateProgress(done: false);
+        final douyinLimiter = protectDouyin
+            ? DouyinFollowRefreshLimiter.forTargetCount(douyinItems.length)
+            : null;
+        await runQueue(
+          items: douyinItems,
+          concurrency: douyinConcurrency <= 0
+              ? 1
+              : douyinConcurrency,
+          douyinLimiter: douyinLimiter,
+          // 抖音阶段不边刷边改列表，整批完成后再 filterData，避免列表频繁跳动
+          publishUiIncrementally: false,
+        );
         if (douyinLimiter != null) {
           final summary = douyinLimiter.finish(douyinItems.length);
           Log.logPrint(
-            "快速模式抖音保护总结 target=${summary.targetCount} "
+            "快速模式抖音阶段总结 target=${summary.targetCount} "
             "interval=${summary.finalInterval.inMilliseconds}ms "
             "success=${summary.successCount} limited=${summary.limitedCount} "
             "elapsed=${summary.elapsed.inMilliseconds}ms",
           );
         }
+        if (generation != _updateGeneration) {
+          return;
+        }
+        // 抖音刷完后再统一刷新 UI
+        filterData();
       }
+
       if (generation != _updateGeneration) {
         return;
       }
