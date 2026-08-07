@@ -117,6 +117,9 @@ class LocalStorageService extends GetxService {
   static const String kUpdateFollowThreadCount = "UpdateFollowThreadCount";
   /// 关注刷新模式：enhanced=增强稳妥，legacy=旧版快速
   static const String kFollowRefreshMode = "FollowRefreshMode";
+  /// 快速模式下是否不限制抖音（极速，默认 false=开启抖音保护）
+  static const String kLegacyFollowUnrestrictedDouyin =
+      "LegacyFollowUnrestrictedDouyin";
   static const String kFollowPageSize = "FollowPageSize";
   static const String kFollowRefreshTaskState = "FollowRefreshTaskState";
   static const String kFollowRefreshTaskTargets = "FollowRefreshTaskTargets";

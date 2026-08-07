@@ -342,6 +342,9 @@ class AppSettingsController extends GetxController {
         kFollowRefreshModeEnhanced,
       ),
     );
+    // 默认 false：快速模式下仍保护抖音；开启后=极速不限制抖音
+    legacyFollowUnrestrictedDouyin.value = LocalStorageService.instance
+        .getValue(LocalStorageService.kLegacyFollowUnrestrictedDouyin, false);
     followPageSize.value = _normalizeFollowPageSize(
       LocalStorageService.instance.getValue(
         LocalStorageService.kFollowPageSize,
@@ -2546,6 +2549,19 @@ class AppSettingsController extends GetxController {
     followRefreshMode.value = value;
     LocalStorageService.instance
         .setValue(LocalStorageService.kFollowRefreshMode, value);
+  }
+
+  /// 快速模式专用：true=极速不限制抖音；false=抖音保护（默认）
+  var legacyFollowUnrestrictedDouyin = false.obs;
+
+  /// 快速模式下是否启用抖音保护（与「极速」开关相反）
+  bool get isLegacyDouyinProtected =>
+      isLegacyFollowRefresh && !legacyFollowUnrestrictedDouyin.value;
+
+  void setLegacyFollowUnrestrictedDouyin(bool e) {
+    legacyFollowUnrestrictedDouyin.value = e;
+    LocalStorageService.instance
+        .setValue(LocalStorageService.kLegacyFollowUnrestrictedDouyin, e);
   }
 
   static const int kFollowPageSizeDefault = 200;

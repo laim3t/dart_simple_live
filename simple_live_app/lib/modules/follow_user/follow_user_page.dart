@@ -594,10 +594,24 @@ class FollowUserPage extends GetView<FollowUserController> {
                   Obx(
                     () => Text(
                       settings.isLegacyFollowRefresh
-                          ? "当前：快速模式（高并发，接近旧版 1.11.x）"
+                          ? (settings.legacyFollowUnrestrictedDouyin.value
+                              ? "当前：极速（不限制抖音，可能 444）"
+                              : "当前：快速 + 抖音保护（推荐）")
                           : "当前：增强模式（抖音限速、补齐封面更完整）",
                       style: Get.textTheme.bodySmall?.copyWith(
                         color: Colors.grey,
+                      ),
+                    ),
+                  ),
+                  Obx(
+                    () => Visibility(
+                      visible: settings.isLegacyFollowRefresh,
+                      child: SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text("极速（不限制抖音）"),
+                        subtitle: const Text("默认关闭；开启后抖音与其它平台一样高并发"),
+                        value: settings.legacyFollowUnrestrictedDouyin.value,
+                        onChanged: settings.setLegacyFollowUnrestrictedDouyin,
                       ),
                     ),
                   ),

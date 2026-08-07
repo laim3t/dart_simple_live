@@ -43,11 +43,28 @@ class FollowSettingsPage extends GetView<AppSettingsController> {
                   child: Obx(
                     () => Text(
                       controller.isLegacyFollowRefresh
-                          ? "快速模式：高并发、无抖音限速、不做完整封面补齐流水线，速度接近旧版 1.11.x；抖音关注过多时可能触发平台限制。"
+                          ? "快速模式：非抖音高并发；抖音默认限速保护。可在下方打开「极速」关闭抖音保护。"
                           : "增强模式：并发更保守、抖音单独限速、手动刷新会补齐封面/标题，更稳但更慢。",
                       style: Get.textTheme.bodySmall?.copyWith(
                         color: Colors.grey,
                       ),
+                    ),
+                  ),
+                ),
+                Obx(
+                  () => Visibility(
+                    visible: controller.isLegacyFollowRefresh,
+                    child: Column(
+                      children: [
+                        AppStyle.divider,
+                        SettingsSwitch(
+                          value: controller.legacyFollowUnrestrictedDouyin.value,
+                          title: "极速（不限制抖音）",
+                          subtitle:
+                              "关闭抖音保护，请求更快，但更容易触发 444 等限制；默认关闭（推荐）",
+                          onChanged: controller.setLegacyFollowUnrestrictedDouyin,
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -107,7 +124,9 @@ class FollowSettingsPage extends GetView<AppSettingsController> {
                   child: Obx(
                     () => Text(
                       controller.isLegacyFollowRefresh
-                          ? "快速模式「自动」会按 CPU 估算并发（约 4～20）；手动 1～8 可再调。"
+                          ? (controller.legacyFollowUnrestrictedDouyin.value
+                              ? "极速：全平台高并发；抖音不限速，风控风险高。"
+                              : "快速+抖音保护：非抖音高并发；抖音最多 2 路并带间隔。线程数主要影响非抖音。")
                           : "增强模式「自动」并发最高约 4；手动 1～8 可再调。",
                       style: Get.textTheme.bodySmall?.copyWith(
                         color: Colors.grey,

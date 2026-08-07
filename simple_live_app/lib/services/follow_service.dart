@@ -968,8 +968,10 @@ class FollowService extends GetxService {
     );
   }
 
-  /// 旧版快速刷新：高并发、无抖音限速、不做第二阶段封面补齐链路。
-  /// 逻辑对齐 1.11.x：getLiveStatus + 开播时再 getRoomDetail(开播时间)。
+  /// 旧版快速刷新：
+  /// - 非抖音：高并发
+  /// - 抖音：默认保护（限速）；「极速」开关打开后不限制抖音
+  /// - 不做增强版第二阶段完整封面补齐流水线
   Future<void> _refreshSelectedStatusLegacy(
     List<FollowUser> targets, {
     required bool force,
@@ -1008,84 +1010,168 @@ class FollowService extends GetxService {
       return;
     }
 
-    final concurrency = getOptimalConcurrency(totalCount: targets.length);
-    Log.logPrint(
-      "旧版快速刷新开始：并发=$concurrency 模式=${_getConcurrencyMode()} "
-      "目标=${targets.length} scope=${scope.scopeKey} "
-      "detail=${allowDetailRefresh && !automatic}",
+    final protectDouyin =
+        AppSettingsController.instance.isLegacyDouyinProtected;
+    final fetchDetail = allowDetailRefresh && !automatic;
+    final ordered = interleaveByPlatform(
+      deprioritizeCurrentRoom(targets.toList()),
     );
+    final nonDouyin =
+        ordered.where((e) => e.siteId != Constant.kDouyin).toList();
+    final douyinItems =
+        ordered.where((e) => e.siteId == Constant.kDouyin).toList();
+
+    final nonDouyinConcurrency =
+        getOptimalConcurrency(totalCount: nonDouyin.length);
+    // 抖音保护：最多 2 路；极速：与其它平台同策略
+    final douyinConcurrency = protectDouyin
+        ? (douyinItems.isEmpty
+            ? 0
+            : douyinItems.length.clamp(1, 2).toInt())
+        : getOptimalConcurrency(totalCount: douyinItems.length);
+
+    Log.logPrint(
+      "快速刷新开始：protectDouyin=$protectDouyin "
+      "nonDouyin=${nonDouyin.length}x$nonDouyinConcurrency "
+      "douyin=${douyinItems.length}x$douyinConcurrency "
+      "scope=${scope.scopeKey} detail=$fetchDetail",
+    );
+
+    if (protectDouyin && douyinItems.length >= 15) {
+      SmartDialog.showToast(
+        "快速模式已启用抖音保护（限速）。若仍频繁限制，可改增强模式或减少全量刷新。",
+      );
+    } else if (!protectDouyin && douyinItems.isNotEmpty) {
+      SmartDialog.showToast(
+        "极速模式：抖音不限速，可能触发平台限制（如 444）。",
+      );
+    }
 
     _setRefreshProgress(
       active: true,
       automatic: automatic,
       scopeKey: scope.scopeKey,
-      stage: "快速刷新开播状态",
+      stage: protectDouyin ? "快速刷新（抖音保护）" : "极速刷新（不限制抖音）",
       current: 0,
       total: targets.length,
     );
 
-    final ordered = interleaveByPlatform(
-      deprioritizeCurrentRoom(targets.toList()),
-    );
-    final taskQueue = Queue<FollowUser>.from(ordered);
     var completed = 0;
     var successCount = 0;
     var failedCount = 0;
+    var limitedCount = 0;
 
     void updateProgress({required bool done}) {
+      final detailParts = <String>[
+        "成功 $successCount",
+        if (failedCount > 0) "失败 $failedCount",
+        if (limitedCount > 0) "抖音受限 $limitedCount",
+      ];
       _setRefreshProgress(
         active: !done,
         automatic: automatic,
         scopeKey: scope.scopeKey,
-        stage: done ? "快速刷新完成" : "快速刷新开播状态",
+        stage: done
+            ? "快速刷新完成"
+            : (protectDouyin ? "快速刷新（抖音保护）" : "极速刷新（不限制抖音）"),
         current: completed,
         total: targets.length,
         successCount: successCount,
         failedCount: failedCount,
-        detail: "成功 $successCount  失败 $failedCount",
+        detail: detailParts.join("  "),
         completed: done,
       );
     }
 
-    Future<void> worker() async {
-      while (taskQueue.isNotEmpty) {
-        if (generation != _updateGeneration) {
-          return;
-        }
-        final item = taskQueue.removeFirst();
-        final ok = await _updateLiveStatusLegacy(
-          item,
-          generation: generation,
-          fetchDetailWhenLiving: allowDetailRefresh && !automatic,
-        );
-        if (generation != _updateGeneration) {
-          return;
-        }
-        completed++;
-        if (ok) {
-          successCount++;
-        } else {
-          failedCount++;
-        }
-        if (completed % 5 == 0 || taskQueue.isEmpty) {
-          updateProgress(done: false);
+    Future<void> runQueue({
+      required List<FollowUser> items,
+      required int concurrency,
+      DouyinFollowRefreshLimiter? douyinLimiter,
+    }) async {
+      if (items.isEmpty || concurrency <= 0) {
+        return;
+      }
+      final queue = Queue<FollowUser>.from(items);
+      Future<void> worker(int workerId) async {
+        while (queue.isNotEmpty) {
+          if (generation != _updateGeneration) {
+            return;
+          }
+          final item = queue.removeFirst();
+          final result = await _updateLiveStatusLegacy(
+            item,
+            generation: generation,
+            fetchDetailWhenLiving: fetchDetail,
+            douyinLimiter: douyinLimiter,
+            workerIndex: workerId,
+          );
+          if (generation != _updateGeneration) {
+            return;
+          }
+          completed++;
+          if (result.limited) {
+            limitedCount++;
+          }
+          if (result.ok) {
+            successCount++;
+          } else {
+            failedCount++;
+          }
+          if (completed % 5 == 0 || queue.isEmpty) {
+            updateProgress(done: false);
+          }
         }
       }
+
+      final workers = <Future<void>>[];
+      final n = concurrency.clamp(1, items.length).toInt();
+      for (var i = 0; i < n; i++) {
+        workers.add(worker(i));
+      }
+      await Future.wait(workers);
     }
 
     try {
-      final workers = <Future<void>>[];
-      for (var i = 0; i < concurrency; i++) {
-        workers.add(worker());
+      if (!protectDouyin) {
+        // 极速：所有平台同一队列、高并发、无限速
+        await runQueue(
+          items: ordered,
+          concurrency: getOptimalConcurrency(totalCount: ordered.length),
+        );
+      } else {
+        // 默认：非抖音快速 + 抖音单独限速（并行，不互相拖死）
+        final douyinLimiter = douyinItems.isEmpty
+            ? null
+            : DouyinFollowRefreshLimiter.forTargetCount(douyinItems.length);
+        await Future.wait([
+          runQueue(
+            items: nonDouyin,
+            concurrency: nonDouyin.isEmpty ? 0 : nonDouyinConcurrency,
+          ),
+          runQueue(
+            items: douyinItems,
+            concurrency: douyinConcurrency,
+            douyinLimiter: douyinLimiter,
+          ),
+        ]);
+        if (douyinLimiter != null) {
+          final summary = douyinLimiter.finish(douyinItems.length);
+          Log.logPrint(
+            "快速模式抖音保护总结 target=${summary.targetCount} "
+            "interval=${summary.finalInterval.inMilliseconds}ms "
+            "success=${summary.successCount} limited=${summary.limitedCount} "
+            "elapsed=${summary.elapsed.inMilliseconds}ms",
+          );
+        }
       }
-      await Future.wait(workers);
       if (generation != _updateGeneration) {
         return;
       }
       updateProgress(done: true);
       filterData();
       Log.logPrint(
-        "旧版快速刷新完成：success=$successCount failed=$failedCount total=${targets.length}",
+        "快速刷新完成：success=$successCount failed=$failedCount "
+        "limited=$limitedCount total=${targets.length} protect=$protectDouyin",
       );
     } finally {
       if (generation == _updateGeneration) {
@@ -1095,27 +1181,37 @@ class FollowService extends GetxService {
     }
   }
 
-  /// 旧版单条状态更新：无抖音限速、无身份校正、无通知链路复杂度。
-  Future<bool> _updateLiveStatusLegacy(
+  /// 旧版单条状态更新。抖音保护时走 [douyinLimiter] 间隔；极速则 limiter=null。
+  Future<({bool ok, bool limited})> _updateLiveStatusLegacy(
     FollowUser item, {
     required int generation,
     required bool fetchDetailWhenLiving,
+    DouyinFollowRefreshLimiter? douyinLimiter,
+    int workerIndex = 0,
   }) async {
     try {
+      if (item.siteId == Constant.kDouyin && douyinLimiter != null) {
+        await douyinLimiter.beforeRequest(workerIndex);
+      }
       final site = Sites.allSites[item.siteId]!;
       final isLiving = await site.liveSite.getLiveStatus(roomId: item.roomId);
       if (generation != _updateGeneration) {
-        return false;
+        return (ok: false, limited: false);
+      }
+      if (item.siteId == Constant.kDouyin && douyinLimiter != null) {
+        douyinLimiter.onSuccess();
       }
       item.liveStatus.value = isLiving ? 2 : 1;
       if (isLiving && fetchDetailWhenLiving) {
         try {
+          if (item.siteId == Constant.kDouyin && douyinLimiter != null) {
+            await douyinLimiter.beforeRequest(workerIndex);
+          }
           final detail = await site.liveSite.getRoomDetail(roomId: item.roomId);
           if (generation != _updateGeneration) {
-            return true;
+            return (ok: true, limited: false);
           }
           item.liveStartTime = detail.showTime;
-          // 顺带刷新标题/封面（轻量，不做增强版整段 metadata 流水线）
           if (detail.userName.trim().isNotEmpty) {
             item.userName = detail.userName;
           }
@@ -1129,19 +1225,32 @@ class FollowService extends GetxService {
             item.roomCover = detail.cover;
           }
         } catch (e) {
+          if (_isDouyinLimited(item, e)) {
+            douyinLimiter?.onLimited();
+            Log.w("快速模式抖音详情请求受限: ${item.userName}");
+            return (ok: true, limited: true);
+          }
           Log.logPrint(e);
         }
       } else if (!isLiving) {
         item.liveStartTime = null;
       }
-      return true;
+      return (ok: true, limited: false);
     } catch (e) {
       Log.logPrint(e);
-      if (generation == _updateGeneration) {
-        item.liveStatus.value = 0;
-        item.liveStartTime = null;
+      final limited = _isDouyinLimited(item, e);
+      if (limited) {
+        douyinLimiter?.onLimited();
+        Log.w("快速模式抖音状态请求受限: ${item.userName}");
       }
-      return false;
+      if (generation == _updateGeneration) {
+        // 受限时保留原状态，避免把「未知」刷成全灭
+        if (!limited) {
+          item.liveStatus.value = 0;
+          item.liveStartTime = null;
+        }
+      }
+      return (ok: false, limited: limited);
     }
   }
 
